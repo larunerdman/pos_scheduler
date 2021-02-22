@@ -1,0 +1,7 @@
+presentations/*  # Lauren's presentations
+POS-master/*     # og repo
+Scheduler_Input_Data/*
+**Rproj**
+**.Rhistory
+workspace.code-workspace
+*DS_store

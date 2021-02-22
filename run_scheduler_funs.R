@@ -1,0 +1,786 @@
+library(readxl)
+
+
+# Run scheduler 
+  # input: WTIS and make phase schedule (WHAT ARE THESE OBJECTS AFTER PRE-PROCESSING??)
+  # make_multi_perservice_sched
+    # make_single_service_sched (for each service)
+      # make_week -> fills in first day and starts with blocks on first day
+        # make_day 
+          # make_block 
+      # make_case_list
+      # find_bf_open_block
+      # add_case OR add_case_block
+      
+# understand the objects being passed around and what is done
+# final output
+##  SCHEDULE FUNCTIONS
+
+## SORT WTIS BEFORE YOU PUT IT THROUGH -- MAY WANT TO ADD THIS TO FUNCTION
+# wtis = wtis[order(wtis$`PCATS Priority`),]
+
+# table(wtis_sub$Service)
+# missmap(wtis_sub)
+
+#' Runs the scheduler
+#'
+#' @param wtis_in str, name of waitlist excel sheet.
+#' @param sub_n int,  subsets waitlist UP TO this row number.
+#' @param case_ids vector, case_ids
+#' @param phase_dates_xlsx str, simple spreadsheet with columns saying "Phase 4", ... and dates below
+#' @param phase_list_xlsx vector: str, phase excel sheets whose order must match phase_dates_xlsx (???????)
+#' @param resample_xlsx str, Not relevant at the moment -- parameters for resampling
+#' @param services list: str, list of services we want in the schedule
+#' @param start_date Date, schedule start date 
+#' @param rotating_services vector: str, services to rotate in daycare blocks (UNUSED)
+#' @param verbose_run bool, detail what's happening as model runs
+#' @param turnover_buffer int, number of minutes to add to each case to account for the time to move one person out of the OR and another in 
+#' @param time vector: str, choose which time to base your schedule on (anesthesia, procedure, and case are predicted, surgeon is provided in the waitlist
+#' @param add_cases bool, whether to simulate cases should be added to the waitlist (UNUSED)
+#' @param high_pri_prop float, proportion of high priority cases to add when simulating cases being added to the model
+#' @param home_only bool, whether to make a schedule only for same-day cases
+#' @param max_time NULL/int, only include procedures < a certain length in minutes
+#' @return List of ..... 
+#' @examples
+#' 
+#' 
+#' 
+#' 
+#' 
+run_scheduler <- function(wtis_in = "WTIS 20200615.xlsx", 
+                          sub_n = NULL, 
+                          case_ids = NULL, #
+                          phase_dates_xlsx = "PhaseDates_extended.xlsx", 
+                          phase_list_xlsx = c("Phase4_v1.xlsx", "Phase5_v1.xlsx", "Phase6_v1.xlsx","Phase7_v1.xlsx", "Phase8_v1.xlsx"), 
+                          resample_xlsx = "Copy of Ongoing Wait List Summary Tables.xlsx", 
+                          services = list("General", "Otolaryngology", "Neurosurgery", "Ophthalmology", "Orthopaedics", "Gynaecology", "Plastics", "Urology", "Dentistry"),
+                          start_date = as.Date("2020-11-02"), 
+                          rotating_services = c("Opthalmology", "Orthopaedics", "Urology", "Otolaryngology"), 
+                          verbose_run = TRUE,
+                          turnover_buffer = 25, 
+                          time = c("anesthesia", "procedure", "case", "surgeon"), 
+                          add_cases = FALSE, 
+                          high_pri_prop = 0.5, 
+                          home_only = FALSE, 
+                          max_time = NULL 
+) {
+
+  # browser()
+
+
+
+
+  ## ---- PREP WTIS ----
+  wtis <- data.frame(read_excel(wtis_in, sheet = 1))
+  if (home_only) {
+    wtis_sub <- wtis[wtis$Patient.Class == "Outpatient Surgical Day Care",
+     c("Case..", "Surgeon", "Length..minutes.", "Service", "PCATS.Priority", 
+     "In.Window", "Planned.Post.op.Destination", 
+     "Case.Procedures", "Patient.Class")] # [complete.cases(wtis[,c("WTIS.ID","Length..minutes.","Service","WTIS.Priority")]),]
+  } else {
+    wtis_sub <- wtis[, c("Case..", "Surgeon", "Length..minutes.", "Service", 
+    "PCATS.Priority", "In.Window", "Planned.Post.op.Destination", "Case.Procedures", "Patient.Class")] # [complete.cases(wtis[,c("WTIS.ID","Length..minutes.","Service","WTIS.Priority")]),]
+  }
+
+  names(wtis_sub) <- c("ID", "Surgeon", "Time", "Service", "PCATS", "InWindow", "PostOPDest", "Case.Procedures", "Patient.Class")
+  wtis_sub$Service[wtis_sub$Service == "Orthopedics"] <- "Orthopaedics"
+  wtis_sub <- wtis_sub[complete.cases(wtis_sub), ] ## may need to comment this at some point -- if there is any missing data in the selected columns, they will be dropped
+  wtis_sub <- wtis_sub[wtis_sub$Service != "Cardiovascular", ]
+  wtis_sub <- wtis_sub[wtis_sub$Service %in% unlist(services), ]
+  wtis_sub <- wtis_sub[order(wtis_sub$PCATS, wtis_sub$InWindow), ]
+
+  # ----- PREDICT TIME OR USE SURGEON INPUT TIME AS CASE TIME VARIABLE -------
+  if (time == "anesthesia") {
+    wtis_sub$time <- pred_wtis_an_time(
+      wtis_dat = wtis_sub, id_col = "ID",
+      model_file = "AN_TIMES_RF_LOGGED_20200701.rds"
+    )
+  } else if (time == "procedure") {
+    wtis_sub$time <- pred_wtis_an_time(
+      wtis_dat = wtis_sub, id_col = "ID",
+      model_file = "PROC_TIMES_RF_LOGGED_20200701.rds"
+    )
+  } else if (time == "case") {
+    wtis_sub$time <- pred_wtis_an_time(
+      wtis_dat = wtis_sub, id_col = "ID",
+      model_file = "CASE_TIMES_RF_LOGGED_20200701.rds"
+    )
+  } else if (time == "surgeon") {
+    wtis_sub$time <- wtis_sub$Time
+  } else {
+    cat("PLEASE SPECIFY MODEL TIME")
+  }
+
+  if (!is.null(max_time)) {
+    wtis_sub <- wtis_sub[wtis_sub$time < max_time, ]
+  }
+
+  hist(wtis_sub$time)
+
+  in_dat <- wtis_sub
+  in_dat$orig_list <- TRUE
+
+  if (!is.null(sub_n)) {
+    in_dat <- wtis_sub[1:sub_n, ]
+  }
+
+  if (!is.null(case_ids)) {
+    in_dat <- wtis_sub[wtis_sub$ID %in% case_ids, ]
+  }
+
+  ## ----- CREATE LIST OF PER-SERVICE SCHEDULES FOR EACH PHASE ------
+  phase_sched <- make_phase_sched(
+    phase_dates_xlsx = phase_dates_xlsx,
+    phase_list = phase_list_xlsx,
+    services = services,
+    rotating_services = rotating_services
+  )
+
+  per_serv_sched <- make_multi_perservice_sched(
+    all_cases = in_dat,
+    phase_block_sched = phase_sched,
+    start_date = start_date,
+    verbose_run = verbose_run,
+    services = services,
+    turnover_buffer = turnover_buffer
+  )
+
+  names(per_serv_sched) <- unlist(services)
+
+  if (!add_cases) {
+    out_list <- list("schedule" = per_serv_sched, "case_list" = in_dat)
+
+    return(out_list)
+
+    # sample from waitlist and simulate adding cases to the waitlist 
+    # won't be used so can delete
+  } else { #@LAUREN EFFECTIVELY IGNORE THIS FOR NOW?
+    resamp_mat <- data.frame(read_excel(resample_xlsx, sheet = 1))
+
+    service_months <- lapply(services, function(service) {
+      months <- unlist(lapply(per_serv_sched[[service]]$sched_list, function(x) {
+        toupper(months(x$`Start date`))
+      }))
+    })
+
+    names(service_months) <- unlist(services)
+
+    services_totals <- rep(NA, length(unlist(services)))
+    names(services_totals) <- unlist(services)
+
+    for (service in unlist(services)) {
+      n_samples <- 0
+      for (my_month in unlist(service_months[service])) {
+        n_samples <- n_samples + ifelse(is.null(resamp_mat[resamp_mat$Service == service, my_month]), 0,
+          resamp_mat[resamp_mat$Service == service, my_month]
+        )
+      }
+      services_totals[service] <- n_samples
+    }
+
+    sample_services <- lapply(services, function(service) {
+      serv_df <- in_dat[in_dat$Service == service, ]
+
+      high_pri_ids <- sample(
+        x = serv_df$ID[serv_df$PCATS <= "III"],
+        size = round(services_totals[service] * high_pri_prop),
+        replace = TRUE
+      )
+      all_pri_ids <- sample(
+        x = serv_df$ID,
+        size = round(services_totals[service] * (1 - high_pri_prop)),
+        replace = TRUE
+      )
+      sampled_ids <- c(high_pri_ids, all_pri_ids)
+
+      out_dat <- serv_df[match(sampled_ids, serv_df$ID), ]
+    })
+
+    all_samp_services <- Reduce(rbind, sample_services)
+    all_samp_services$orig_list <- FALSE
+
+    full_dat <- rbind(all_samp_services, in_dat)
+
+    new_per_serv_sched <- make_multi_perservice_sched(
+      all_cases = full_dat,
+      phase_block_sched = phase_sched,
+      start_date = start_date,
+      verbose_run = verbose_run,
+      services = services,
+      turnover_buffer = turnover_buffer
+    )
+
+    names(new_per_serv_sched) <- unlist(services)
+
+    out_list <- list("schedule" = new_per_serv_sched, "case_list" = in_dat)
+
+    return(out_list)
+  }
+}
+
+
+
+
+## EXTRACT CALENDAR SPREADSHEET OF SCHEDULE LIST. Post-hoc? 
+# @DS - big function, can this be re-factored
+get_spreadsheet_per_service_sched <- function(in_sched_raw,
+                                              per_block = TRUE,
+                                              per_case = TRUE,
+                                              per_day = TRUE,
+                                              write_files = TRUE,
+                                              orig_data_only = TRUE) {
+
+  # browser()
+  out_list <- list()
+  block_df <- NULL
+  case_df <- NULL
+  day_df <- NULL
+
+  in_sched <- in_sched_raw$sched
+
+  if (per_block) {
+    services <- c()
+    weeks <- c()
+    date <- c()
+    block_type <- c()
+    block_length <- c()
+    n_cases <- c()
+    block_long_short <- c()
+
+    for (service in names(in_sched)) {
+
+      for (week in 1:length(in_sched[[service]]$sched_list)) {
+
+        for (day in 1:length(in_sched[[service]]$sched_list[[week]][["Days"]])) {
+
+          for (block in 1:length(in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["procedure_blocks"]])) {
+            services <- c(services, service)
+            weeks <- c(weeks, week)
+            date <- c(date, in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["date"]])
+            # browser()
+            if (is.null(in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["procedure_blocks"]][[block]][["block_type"]])) {
+              my_block_type <- NA
+            } else {
+              my_block_type <- in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["procedure_blocks"]][[block]][["block_type"]]
+            }
+            block_type <- c(block_type, my_block_type)
+            block_length <- c(block_length, sum(in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["procedure_blocks"]][[block]][["case_times"]]))
+            n_cases <- c(n_cases, length(in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["procedure_blocks"]][[block]][["case_ids"]]))
+            if (is.null(in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["procedure_blocks"]][[block]][["short_long"]])) {
+              long_short <- NA
+            } else {
+              long_short <- in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["procedure_blocks"]][[block]][["short_long"]]
+            }
+            block_long_short <- c(block_long_short, long_short)
+          }
+        }
+      }
+    }
+
+    # browser()
+    block_df <- data.frame(services, weeks, as.Date(date, origin = "1970-01-01"), block_type, block_length, n_cases, block_long_short)
+  }
+
+  if (per_case) {
+    services <- c()
+    weeks <- c()
+    date <- c()
+    block_num <- c()
+    block_type <- c()
+    case_id <- c()
+    case_length <- c()
+    case_orig <- c()
+    surgeon <- c()
+    block_long_short <- c()
+
+    for (service in names(in_sched)) {
+
+      for (week in 1:length(in_sched[[service]]$sched_list)) {
+
+        for (day in 1:length(in_sched[[service]]$sched_list[[week]][["Days"]])) {
+
+          for (block in 1:length(in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["procedure_blocks"]])) {
+
+            if (length(in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["procedure_blocks"]][[block]]$case_ids) > 0) {
+
+              for (case in 1:length(in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["procedure_blocks"]][[block]]$case_ids)) {
+                services <- c(services, service)
+                weeks <- c(weeks, week)
+                date <- c(date, in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["date"]])
+                if (is.null(in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["procedure_blocks"]][[block]][["block_type"]])) {
+                  my_block_type <- NA
+                } else {
+
+                  my_block_type <- in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["procedure_blocks"]][[block]][["block_type"]]
+                }
+                block_type <- c(block_type, my_block_type)
+                block_num <- c(block_num, block)
+                case_id <- c(case_id, in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["procedure_blocks"]][[block]][["case_ids"]][case])
+                case_length <- c(case_length, in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["procedure_blocks"]][[block]][["case_times"]][case])
+                case_orig <- c(case_orig, in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["procedure_blocks"]][[block]][["orig_data"]][case])
+                surgeon <- c(surgeon, in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["procedure_blocks"]][[block]][["surgeon"]][case])
+
+                if (is.null(in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["procedure_blocks"]][[block]][["short_long"]])) {
+                  long_short <- NA
+                } else {
+                  long_short <- in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["procedure_blocks"]][[block]][["short_long"]]
+                }
+                block_long_short <- c(block_long_short, long_short)
+              }
+            }
+          }
+        }
+      }
+    }
+    # browser()
+    case_df <- data.frame(services, weeks, Date = as.Date(date, origin = "1970-01-01"), block_type, block_num, case_id, case_length, surgeon, block_long_short, case_orig)
+  }
+
+  if (per_day) {
+    services <- c()
+    weeks <- c()
+    date <- c()
+    n_cases <- c()
+    no_blocks <- c()
+    cases_length <- c()
+    picu_oicu <- c()
+    constant_obs <- c()
+    in_patient <- c()
+    short_stay <- c()
+    cccu <- c()
+    fiveA <- c()
+    fiveAsss <- c()
+    fiveB <- c()
+    fiveCsd <- c()
+    eightC <- c()
+
+
+    for (service in names(in_sched)) {
+      for (week in 1:length(in_sched[[service]]$sched_list)) {
+        for (day in 1:length(in_sched[[service]]$sched_list[[week]][["Days"]])) {
+          services <- c(services, service)
+          weeks <- c(weeks, week)
+          date <- c(date, in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["date"]])
+          no_blocks <- c(no_blocks, in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["no_blocks"]])
+
+          cases_vec <- c()
+          cases_len <- c()
+          post_op_dest_vec <- c()
+
+          for (block in 1:length(in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["procedure_blocks"]])) {
+            cases_vec <- c(cases_vec, length(in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["procedure_blocks"]][[block]][["case_ids"]]))
+            cases_len <- c(cases_len, sum(in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["procedure_blocks"]][[block]][["case_times"]]))
+            post_op_dest_vec <- c(post_op_dest_vec, in_sched[[service]]$sched_list[[week]][["Days"]][[day]][["procedure_blocks"]][[block]][["post_op_destination"]])
+          }
+
+          # browser()
+
+          cases_length <- c(cases_length, sum(cases_len))
+          n_cases <- c(n_cases, sum(cases_vec))
+          picu_oicu <- c(picu_oicu, sum(post_op_dest_vec == "PICU" | post_op_dest_vec == "OICU"))
+          constant_obs <- c(constant_obs, length(grep(pattern = "Constant Observation", x = post_op_dest_vec)))
+          fiveA <- c(fiveA, length(grep(pattern = "5A Constant Observation", x = post_op_dest_vec)))
+          fiveAsss <- c(fiveAsss, length(grep(pattern = "5A Surgical Short Stay Constant Obs", x = post_op_dest_vec)))
+          fiveB <- c(fiveB, length(grep(pattern = "5B Constant Observation", x = post_op_dest_vec)))
+          fiveCsd <- c(fiveCsd, length(grep(pattern = "5C Stepdown", x = post_op_dest_vec)))
+          eightC <- c(eightC, length(grep(pattern = "8C Constant Observation", x = post_op_dest_vec)))
+
+          ### WRONG  -- ?
+          in_patient <- c(in_patient, sum(post_op_dest_vec != "Home"))
+          short_stay <- c(short_stay, length(grep("Short Stay", post_op_dest_vec)))
+          cccu <- c(cccu, sum(post_op_dest_vec == "CCCU"))
+
+          # browser()
+        }
+      }
+    }
+    # browser()
+    day_df <- data.frame(
+      services, weeks, as.Date(date, origin = "1970-01-01"),
+      no_blocks, n_cases, cases_length, picu_oicu, constant_obs, in_patient, short_stay, cccu,
+      fiveA, fiveAsss, fiveB, fiveCsd, eightC
+    )
+    names(day_df) <- c(
+      "services", "weeks", "date",
+      "no_blocks", "n_cases", "case_length", "picu_oicu", "constant_obs", "in_patient", "short_stay", "cccu",
+      "fiveA", "fiveAsss", "fiveB", "fiveCsd", "eightC"
+    )
+
+    day_df_withbd <- data.frame(matrix(nrow = 0, ncol = length(c("services", "weeks", "date", "no_blocks", "n_cases", "cases_length", "picu_oicu", "constant_obs", "in_patient", "short_stay", "cccu", "fiveA", "fiveAsss", "fiveB", "fiveCsd", "eightC"))))
+    names(day_df_withbd) <- c("services", "weeks", "date", "no_blocks", "n_cases", "cases_length", "picu_oicu", "constant_obs", "in_patient", "short_stay", "cccu", "fiveA", "fiveAsss", "fiveB", "fiveCsd", "eightC")
+
+    for (service in unique(day_df$services)) {
+      # browser()
+      service_df <- day_df[day_df$services == service, ]
+      service_df <- service_df[order(service_df$date), ]
+
+      total_cases <- sum(service_df$n_cases)
+
+      for (day in 1:nrow(service_df)) {
+        remaining_cases <- total_cases - sum(na.omit(service_df[1:day, "n_cases"]))
+        service_df[day, "remaining_cases"] <- remaining_cases
+      }
+      day_df_withbd <- rbind(day_df_withbd, service_df)
+    }
+  }
+
+  if (write_files) {
+    if (!is.null(block_df)) {
+      write.csv(block_df, file = "per_block_data.csv", quote = FALSE)
+    }
+    if (!is.null(case_df)) {
+      write.csv(case_df, file = "per_case_data.csv", quote = FALSE)
+    }
+    if (!is.null(day_df)) {
+      write.csv(day_df, file = "per_day_data.csv", quote = FALSE)
+    }
+  }
+
+  out_list <- list("block_df" = block_df, "case_df" = case_df, "day_df" = day_df_withbd)
+
+  return(out_list)
+}
+
+
+### ----- preparing the phase schedule ------
+
+
+#' Create phase schedule list
+#'
+#' @param phase_dates_xlsx str, simple spreadsheet with columns saying "Phase 4", ... and dates below
+#' @param phase_list vector: str, phase excel sheets whose order must match phase_dates_xlsx (???????)
+#' @param services list: str, list of services we want in the schedule
+#' @param rotating_services vector: str, services to rotate in daycare blocks (UNUSED)
+#' @return Named list, first element is a vector of dates and
+#'  the second element is a list of phase dates, where each phase 
+#'  is a list of services, and each service contains a list of days
+#'  of the week + daycare, and a dataframe is present if a block is scheduled
+#' 
+make_phase_sched <- function(phase_dates_xlsx, ## Excel file with phase dates
+                             phase_list,
+                             services,
+                             rotating_services) {
+
+
+  # dataframe where each header is a phase# and rows are the dates coinciding with the beginning(?) of phase date
+  phase_dates_infile <- data.frame(read_excel(phase_dates_xlsx))
+
+  # creates a list of dataframes, where each element is a phase#
+  phase_sched_list <- lapply(as.list(phase_list), function(file_name) {
+    in_file <- data.frame(read_excel(file_name))
+    names(in_file)[1] <- "Service"
+    return(in_file)
+  })
+
+  # assigns phase #s
+  names(phase_sched_list) <- names(phase_dates_infile)
+
+  # for each phase, for each service -> make_service_daily_block_mat
+  daily_phase_scheds <- lapply(phase_sched_list, function(phase_infile) {
+    service_schedules <- lapply(services, function(service) {
+      make_service_daily_block_mat(
+        service = service,
+        phase_sched = phase_infile,
+        rotating_services = rotating_services
+      )
+    })
+    names(service_schedules) <- unlist(services)
+
+    return(service_schedules)
+  })
+
+  # browser() DS 
+
+  out_phase_sched <- list(
+    "Phase dates" = phase_dates_infile,
+    "Blocks per service" = daily_phase_scheds
+  )
+
+  return(out_phase_sched)
+}
+
+## change this to take input from excel spreasheet
+## maybe this should be the service-specific block matrix
+##  thus we should have a "service" argument as well
+prep_block_matrix <- function(block_matrix ## matrix of block availabilities
+) {
+  block_matrix$block_length_mins <- as.numeric(block_matrix$block_length) * 60
+  block_matrix$block_type <- paste0("T", block_matrix$block_length, "h")
+  block_matrix$weekend <- FALSE
+  block_matrix$daycare <- FALSE
+
+  week_total_num_blocks <- sum(block_matrix$blocks_per_week)
+  all_week_blocks <- unlist(sapply(1:length(block_matrix$block_type), 
+  function(i) rep(block_matrix$block_type[i], block_matrix$blocks_per_week[i])))
+  block_day_assignments <- rep(1:5, times = ceiling(week_total_num_blocks / 5))[1:week_total_num_blocks]
+  blocks_per_day <- table(block_day_assignments)
+
+  out_list <- list(
+    "blocks_per_day" = blocks_per_day,
+    "updated_block_matrix" = block_matrix
+  )
+  return(out_list)
+}
+
+#' Format daily block matrices per service
+#' @param services str, the specific service
+#' @param phase_sched data.frame, schedule of interest
+#' @param rotating_services vector:str, services to rotate
+#' @return List of ..... 
+#' @examples
+#' 
+#' 
+make_service_daily_block_mat <- function(service, phase_sched, rotating_services) {
+
+  # browser()
+
+  # for given service, subset phase sched
+  service_sched <- phase_sched[grep(pattern = service, x = phase_sched[, 1]), ]
+
+
+  days_of_week <- list("MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "DAYCARE")
+
+  # fill in "DAYCARE" and
+  # use modulus
+
+  daily_sched <- lapply(days_of_week[1:5], function(day) {
+    day_hours <- as.matrix(table(na.omit(service_sched[, day])))
+
+    if (length(day_hours) > 0) { ## check that any blocks are scheduled
+      block_mat <- prep_block_matrix(block_matrix = data.frame(blocks_per_week = day_hours,
+      block_length = rownames(day_hours)
+      ))$updated_block_matrix
+    } else { ## otherwise no block matrix
+      block_mat <- NA
+    }
+    # print(block_mat)
+    return(list(block_mat))
+  })
+
+  if (service %in% rotating_services) {
+    daycare_sched <- phase_sched[grep(pattern = "daycare", x = phase_sched[, 1]), ]
+    if (nrow(daycare_sched) > 0) {
+      daily_sched[["DAYCARE"]] <- make_daycare_block_matrix(service, daycare_sched, rotating_services)
+    } else {
+      daily_sched[["DAYCARE"]] <- NA
+    }
+  } else {
+    daily_sched[["DAYCARE"]] <- NA
+  }
+
+  names(daily_sched) <- days_of_week
+  # print(daily_sched)
+  return(daily_sched)
+}
+
+## make a daycare blcok matrix -- this isn't used yet
+make_daycare_block_matrix <- function(service, daycare_sched, rotating_services) {
+  num_r_services <- length(rotating_services)
+  mods <- paste0("Mod", ((1:num_r_services) - 1))
+  splits <- paste0("Split", ((1:num_r_services)))
+
+  weekend_blocks <- as.numeric(na.omit(as.character(unlist(daycare_sched[daycare_sched[, 1] == "Weekend daycare", 2:6]))))
+  weekend_split <- lapply(split(x = weekend_blocks, f = 1:num_r_services), function(y) {
+    ifelse(length(y) > 0, y, NA)
+  })
+  names(weekend_split) <- splits
+
+  weekday_blocks <- as.numeric(na.omit(as.character(unlist(daycare_sched[daycare_sched[, 1] == "Weekly daycare", 2:6]))))
+  weekday_split <- lapply(split(x = weekday_blocks, f = 1:num_r_services), function(y) {
+    ifelse(length(y) > 0, y, NA)
+  })
+  names(weekday_split) <- rev(splits)
+
+  service_idx <- which(rotating_services == service)
+  idx_vec <- c(1:num_r_services, 1:num_r_services)
+  daycare_block_mat_list <- sapply(mods, function(mod) {
+    mod_num <- as.numeric(substr(x = mod, start = 4, stop = 4))
+    sched_idx <- idx_vec[(service_idx + mod_num)]
+
+    if (!is.na(weekday_split[[paste0("Split", sched_idx)]])) {
+      weekday_vec <- table(weekday_split[[paste0("Split", sched_idx)]])
+      weekday_block_mat <- data.frame(
+        blocks_per_week = weekday_vec,
+        block_length = as.numeric(names(weekday_vec)),
+        block_length_mins = as.numeric(names(weekday_vec)) * 60,
+        block_type = paste0("T", names(weekday_vec), "h"),
+        weekend = rep(FALSE, length(weekday_vec))
+      )
+    } else {
+      weekday_block_mat <- data.frame(
+        blocks_per_week = c(),
+        block_length = c(),
+        block_length_mins = c(),
+        block_type = c(),
+        weekend = c()
+      )
+    }
+    if (!is.na(weekend_split[[paste0("Split", sched_idx)]])) {
+      weekend_vec <- table(weekend_split[[paste0("Split", sched_idx)]])
+      weekend_block_mat <- data.frame(
+        blocks_per_week = weekend_vec,
+        block_length = as.numeric(names(weekend_vec)),
+        block_length_mins = as.numeric(names(weekend_vec)) * 60,
+        block_type = paste0("T", names(weekend_vec), "h"),
+        weekend = rep(TRUE, length(weekend_vec))
+      )
+    } else {
+      weekend_block_mat <- data.frame(
+        blocks_per_week = c(),
+        block_length = c(),
+        block_length_mins = c(),
+        block_type = c(),
+        weekend = c()
+      )
+    }
+
+
+    all_daycare_blocks <- data.frame(rbind(weekday_block_mat, weekend_block_mat))
+
+    return(all_daycare_blocks)
+  })
+
+  return(daycare_block_mat_list)
+}
+
+### ----- for predicting surgery (?) time -----
+
+# called by run scheduler
+
+
+pred_wtis_an_time <- function(wtis_dat, ## WAITLIST DATA
+                              model_file, ## "CASE_TIMES_RF_LOGGED_20200701.rds", "PROC_TIMES_RF_LOGGED_20200701.rds", "AN_TIMES_RF_LOGGED_20200701.rds"
+                              id_col = "ID",
+                              surgeon_col = "Surgeon",
+                              service_col = "Service",
+                              proc_col = "Case.Procedures",
+                              surg_pred_time_col = "Time",
+                              patient_class_col = "Patient.Class",
+                              logged_output = TRUE) {
+  # browser()
+  require(randomForest)
+
+  pred_df <- prep_wtis_dat(
+    wtis_dat = wtis_dat,
+    id_col = "ID",
+    surgeon_col = "Surgeon",
+    service_col = "Service",
+    proc_col = "Case.Procedures",
+    surg_pred_time_col = "Time",
+    patient_class_col = "Patient.Class"
+  )
+
+  pred_model <- readRDS(model_file)
+
+  # browser()
+
+  pred_out <- predict(object = pred_model, newdata = pred_df)
+
+  if (logged_output) {
+    pred_out <- exp(pred_out)
+  }
+
+  return(pred_out)
+}
+
+
+
+## PREDICT TIMES
+prep_wtis_dat <- function(wtis_dat, ## waitlist data
+                          id_col, ## id column name
+                          surgeon_col, ## surgeon column name
+                          service_col, ## service column name
+                          proc_col, ## procedure column name
+                          surg_pred_time_col, ## surgeon predicted procedure time column name
+                          patient_class_col ## patient class column name
+) {
+  # browser()
+
+  my_surg_df <- make_surgeon_df(
+    case_id_vec = wtis_dat[, id_col],
+    surgeon_vec = wtis_dat[, surgeon_col]
+  )
+  my_proc_df <- make_proc_df(
+    case_id_vec = wtis_dat[, id_col],
+    proc_vec = wtis_dat[, proc_col]
+  )
+
+  out_dat <- wtis_dat[, c(id_col, surgeon_col, service_col, surg_pred_time_col, patient_class_col)]
+
+  out_dat$Service_fac <- factor(out_dat[, service_col], levels = c(
+    "Orthopedics", "Plastics", "Gynaecology", "Neurosurgery",
+    "Ophthalmology", "Urology", "General", "Dentistry", "Cardiovascular",
+    "Otolaryngology", "Gastroenterology", "Oral Surgery", "Cardiology",
+    "Rheumatology", "Pediatrics", "Diagnostic Imaging", "Haematology",
+    "Trauma", "Anesthesia", "Respirology", "Neurology", "Dermatology", "Transplant"
+  ))
+
+  out_dat$Patient.Class_fac <- factor(out_dat[, service_col],
+    levels = c(
+      "Surgical Admit", "Outpatient Surgical Day Care", "Inpatient Acute",
+      "Outpatient Ambulatory Care", "Outpatient Surgical Emergencies", "Outpatient Medical Day Care"
+    )
+  )
+  out_dat$surg_pred_time <- out_dat[, surg_pred_time_col]
+
+  sub_merg <- out_dat[, c(id_col, "Service_fac", "Patient.Class_fac", "surg_pred_time")]
+
+  sub_with_proc <- merge(sub_merg, my_proc_df, by.x = id_col, by.y = "Case_ID")
+  full_pred_df <- merge(sub_with_proc, my_surg_df, by.x = id_col, by.y = "Case_ID")
+
+  return(full_pred_df)
+}
+
+## MAKE A 1-HOT DATA FRAME OF THE MOST COMMON SICKKIDS SURGEONS
+make_surgeon_df <- function(case_id_vec, surgeon_vec) {
+  surgeons <- c(
+    "LEBEL", "CUSHING", "ALI", "CASAS", "BARRETT", "GARISTO",
+    "PIERRO", "JAMES", "FORREST", "BAERTSCHIGER", "WALES", "HOWARD",
+    "LORENZO", "PAPSIN", "AZZIE", "BAGLI", "CAMPISI", "DRAKE",
+    "KELLEY", "KOYLE", "MALLIPATNA", "MIRESKANDARI", "MUNI", "NAJM-TEHRANI",
+    "RUTKA", "WAN", "WOLTER", "PHILLIPS", "KWAN-WONG", "NARAYANAN",
+    "FISH", "HOPYAN", "FISHER", "CLARKE", "BOUCHARD", "CARMICHAEL",
+    "HADDAD", "CHEMALY", "GARBEDIAN", "IBRAHIM", "ZELLER", "SMITH",
+    "WONG", "HEON", "PAPANIKOLAOU", "ALLEN", "DEANGELIS", "LEWIS",
+    "CAMP", "FECTEAU", "VINCENT", "DAVIDGE", "PROPST", "BORSCHEL",
+    "COLES", "BARRON", "SAYED", "HIMIDAN", "WOLINSKA", "CATTRAL",
+    "CHIU", "LANGER", "KRAFT", "KULKARNI", "SUWWAN", "CHUNG",
+    "DIRKS", "GHANEKAR", "FURLONGE", "GALLIE", "KERTES", "ZANI",
+    "KIVES", "HONJO", "HALLER", "SPITZER", "REGINALD", "AGGARWAL",
+    "MILLAR"
+  )
+
+  # browser()
+
+  surg_df <- data.frame(matrix(0, nrow = length(case_id_vec), ncol = (length(surgeons) + 1)))
+  names(surg_df) <- c("Case_ID", surgeons)
+  surg_df$Case_ID <- case_id_vec
+
+  for (surg in surgeons) {
+    surg_df[grep(pattern = surg, x = toupper(surgeon_vec)), surg] <- 1
+  }
+
+  names(surg_df) <- gsub(pattern = "-", replacement = ".", names(surg_df))
+  # names(full_pred_df) = gsub(pattern = "-",".",x = names(full_pred_df))
+
+  return(surg_df)
+}
+
+## MAKE A 1-HOT DATAFRAME OF THE MOST COMMON SICKKIDS PROCEDURES
+make_proc_df <- function(case_id_vec, proc_vec) {
+
+  # browser()
+
+  wtis_proc_codes <- unique(readRDS("wtis_proc_cods.rds"))
+  proc_df <- data.frame(matrix(0, nrow = length(case_id_vec), ncol = (length(wtis_proc_codes) + 1)))
+  names(proc_df) <- c("Case_ID", paste0("C", wtis_proc_codes))
+  proc_df$Case_ID <- case_id_vec
+
+  for (proc in wtis_proc_codes) {
+    proc_df[grep(pattern = proc, x = toupper(proc_vec)), paste0("C", proc)] <- 1
+  }
+
+
+  return(proc_df)
+}
+
