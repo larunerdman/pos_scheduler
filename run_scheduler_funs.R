@@ -26,7 +26,7 @@ library(readxl)
 #'
 #' @param wtis_in str, name of waitlist excel sheet.
 #' @param sub_n int,  subsets waitlist UP TO this row number.
-#' @param case_ids vector, case_ids
+#' @param case_ids vector, case_ids∏
 #' @param phase_dates_xlsx str, simple spreadsheet with columns saying "Phase 4", ... and dates below
 #' @param phase_list_xlsx vector: str, phase excel sheets whose order must match phase_dates_xlsx (???????)
 #' @param resample_xlsx str, Not relevant at the moment -- parameters for resampling
@@ -42,11 +42,6 @@ library(readxl)
 #' @param max_time NULL/int, only include procedures < a certain length in minutes
 #' @return List of ..... 
 #' @examples
-#' 
-#' 
-#' 
-#' 
-#' 
 run_scheduler <- function(wtis_in = "WTIS 20200615.xlsx", 
                           sub_n = NULL, 
                           case_ids = NULL, #
@@ -66,8 +61,6 @@ run_scheduler <- function(wtis_in = "WTIS 20200615.xlsx",
 ) {
 
   # browser()
-
-
 
 
   ## ---- PREP WTIS ----
@@ -115,10 +108,11 @@ run_scheduler <- function(wtis_in = "WTIS 20200615.xlsx",
     wtis_sub <- wtis_sub[wtis_sub$time < max_time, ]
   }
 
-  hist(wtis_sub$time)
+  # hist(wtis_sub$time)
 
   in_dat <- wtis_sub
   in_dat$orig_list <- TRUE
+  
 
   if (!is.null(sub_n)) {
     in_dat <- wtis_sub[1:sub_n, ]
@@ -218,6 +212,184 @@ run_scheduler <- function(wtis_in = "WTIS 20200615.xlsx",
   }
 }
 
+
+#' Creates service schedule for each service, for each phase block ....
+#' @param all_cases, data.frame: processed waitlist 
+#' @param phase_block_sched list, list of phase dates with services and dotw
+#' @param start_date date to start scheduling (?)
+#' @param estimate_remaining_time bool,
+#' @param n_weeks_for_estimate ??
+#' @param verbose_run bool, verbose level
+#' @param turnover_buffer int, account for mvoing patients in and out 
+#' @param services list:str services
+#' @return 
+#' @examples
+make_multi_perservice_sched <- function(all_cases, ## waitlist
+                                        phase_block_sched,
+                                        start_date = as.Date("2020-07-06"),
+                                        estimate_remaining_time = TRUE,
+                                        n_weeks_for_estimate = 3,
+                                        verbose_run = TRUE,
+                                        turnover_buffer = 25, ## condition buffer on case type
+                                        services = list(
+                                          "General", "Otolaryngology", "Neurosurgery",
+                                          "Ophthalmology", "Orthopaedics",
+                                          "Gynaecology", "Plastics",
+                                          "Urology", "Dentistry"
+                                        )) {
+
+
+  # take elements of the named list                                        
+  phase_dates <- phase_block_sched[["Phase dates"]]
+  all_service_blocks <- phase_block_sched[["Blocks per service"]]
+
+  # for each service, for each block
+  all_service_schedules <- lapply(services, function(service) {
+
+    # get all phase blocks for the specified service
+    service_block <- lapply(all_service_blocks, function(phase_blocks) {
+      phase_blocks[[service]]
+    })
+    service_cases <- all_cases[grep(pattern = service, x = all_cases$Service), ]
+    service_cases <- service_cases[order(service_cases$PCATS, service_cases$InWindow, service_cases$Surgeon), ]
+
+    service_schedule <- make_single_service_sched(
+      start_date = start_date,
+      weekly_block_mat = service_block,
+      phase_dates = phase_dates,
+      in_case_list = service_cases,
+      turnover_buffer = turnover_buffer
+    )
+    return(service_schedule)
+  })
+
+  return(all_service_schedules)
+}
+
+## MAKE SCHEDULE FOR 1 SERVICE
+
+#' Creates service schedule for a service
+#' @param turnover_buffer int, number of minutes to add to each case to account for the time to move one person out of the OR and another in
+#' @param start_date date, when to start the schedule
+#' @param weekly_block_mat ?, formatted block schedule openings (i.e. available times to do surgery)
+#' @param phase_dates matrix, phase_dates
+#' @param in_case_list, list, cases to add to schedule, all from the same service 
+#' @param in_sched ?, if there's an existing schedule you'd like to add to, you can input it here
+#' @param verbose bool, verbosity level
+#' @param BF bool, whether to use best-fit or first-fit algorithm
+#' @return
+
+# maybe more than one block type in a day 
+
+# 
+make_single_service_sched <- function(turnover_buffer = 25, 
+                                      start_date = NULL, 
+                                      weekly_block_mat = NULL, 
+                                      phase_dates = NULL, 
+                                      in_case_list = NULL, 
+                                      in_sched = NULL, 
+                                      verbose = TRUE,
+                                      BF = TRUE 
+) {
+  cases_scheduled <- c()
+
+  if (is.null(start_date)) {
+    start_date <- Sys.Date()
+  }
+
+  if (is.null(weekly_block_mat)) {
+    return("Please enter weekly_block_mat to create schedule")
+  } else if (is.null(in_case_list)) {
+    return("Please enter list of cases to create scedule")
+  } else if (is.null(phase_dates)) {
+    return("Please enter phase_dates to create scedule")
+  } else {
+    if (is.null(in_sched)) {
+      ## initialize schedule
+      ## makes an empty week to fill up with actual booked cases
+      # composed of weeks, 
+      ## creates pink sector of slide 3, starts with 1 day
+      # 
+      sched_list <- list(make_week(
+        weekly_block_matrix = weekly_block_mat,
+        start_date = start_date,
+        phase_dates = phase_dates
+      ))
+  # if no_blocks, goes in adds a new day to the schedule of the week
+    } else { # DS: in this case I assume it would take in an existing schedule?
+      sched_list <- in_sched
+    }
+
+
+    in_case_list <- in_case_list[complete.cases(in_case_list), ]
+
+    # browser()
+
+    for (my_row in 1:nrow(in_case_list)) {
+
+      if (length(in_case_list[my_row, "ID"]) == 0) {
+        if (verbose) {
+          print("Missing row passed")
+        }
+      } else if (is.na(in_case_list[my_row, "ID"])) {
+        if (verbose) {
+          print("Missing row passed")
+        }
+      } else {
+        my_case_list <- make_case_list(
+          case_id = unlist(in_case_list[my_row, "ID"]),
+          case_length = unlist(in_case_list[my_row, "time"]),
+          case_priority = in_case_list[my_row, "PCATS"],
+          case_surgeon = in_case_list[my_row, "Surgeon"],
+          post_op_destination = in_case_list[my_row, "PostOPDest"],
+          orig_data = in_case_list[my_row, "orig_list"],
+          turnover_buffer = turnover_buffer
+        )
+        if (verbose) {
+          print(paste0("Finding block for Case ID: ", my_case_list$case_id))
+        }
+        # outputs NA if there is no opening 
+        open_block_update <- find_bf_open_block(case_list = my_case_list, 
+                                                block_schedule = sched_list)
+        # ^ list w/ openings
+
+        # both functions below will return a booked case 
+        if (!is.na(open_block_update[[1]])) { # this actually checks week 
+          # outputs schedule with the case booked in 
+          # the more common ...
+
+          if(verbose){ print("\tOpen block found in schedule, adding case..")}
+          # if (my_row %% 5 == 0) {browser()}
+          sched_list <- add_case(case_list = my_case_list, 
+                                  block_schedule = sched_list, 
+                                  block_update = open_block_update)
+            
+        } else {
+          
+          # updates the schedule list to have more days 
+          # days added to schedule until -> open block that is suitable for the case 
+          # also schedules the case 
+          # one case per block (orthopaedics is most common for this)
+          if(verbose){ print("\tNo open block found in schedule, adding days until block available for case..")}
+          #if ((my_row) == 15) {browser()}
+          sched_list <- add_case_block_refactor(case_list = my_case_list, 
+                                      block_schedule = sched_list, 
+                                      service_block_matrix = weekly_block_mat, 
+                                      phase_dates = phase_dates)
+        }
+
+        if (verbose) {
+          print(paste0("Case ID: ", my_case_list$case_id, " added to schedule."))
+        }
+        cases_scheduled <- c(cases_scheduled, my_case_list$case_id)
+      }
+    }
+
+    out_list <- list("sched_list" = sched_list, "cases_scheduled" = cases_scheduled)
+
+    return(out_list)
+  }
+}
 
 
 

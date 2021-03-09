@@ -1,16 +1,11 @@
 
 library(readxl)
-
+library(dplyr)
+library(lubridate)
+library(purrr)
 setwd("Scheduler_Input_Data/")
 
 ## CREATE SCHEDULING LIST
-
-# will re-factor this when possible
-# source('../make_phase_schedule_funs.R')
-# source( '../scheduler_functions.R') 
-# source( '../plot_and_post_hoc.R') 
-# source('../ORRACLE ELECTIVE - v2 - 20201210.R') # all other functions that have not been moved yet
-
 
 
 source('../run_scheduler_funs.R')
@@ -49,28 +44,49 @@ an_sched_out <- run_scheduler(
     home_only = FALSE,
     max_time = 180
 )
+all.equal(an_sched_out2, # original add_case_block
+          an_sched_out) # refactored add_case_block
+          an_sched_out3 # no max_block_sum fix
+
+df1 <- get_spreadsheet_per_service_sched(in_sched_raw = an_sched_out)$day_df %>% as_tibble() %>% mutate(weekday = weekdays(date)) 
+df2 <- get_spreadsheet_per_service_sched(in_sched_raw = an_sched_out2)$day_df %>% as_tibble() %>% mutate(weekday = weekdays(date)) 
+
+all.equal(df1 %>% filter(!weekday %in% c('Saturday')), df2)
 
 
+source("../plotting_funs.R")
+source("../post_hoc_funs.R")
 ## COMPUTE REMAINING TIME TO CLEARING PER-SERVICE
 (an_times_df <- get_time_remaining_per_service(an_sched_out,
     return_table = TRUE,
     verbose = TRUE
 ))
+``
+# amount of time that is shown in the plot 
+
+
 
 #View(an_times_df)
 
 
 ## RUN THIS AND ADD BOTH POST-OP DESTINATION AND WHETHER OR NOT IT'S AN ORIG CASE PER-CASE, PER-BLOCK, AND PER-DAY
+
+# USE THIS TO DEBUG 
+# look per case and see if cases in the same block have the same schedule
+# plot(original burndown vs the new burndown) 
+# 
 dfs_list <- get_spreadsheet_per_service_sched(
     in_sched_raw = an_sched_out,
     per_block = TRUE,
     per_case = TRUE,
     per_day = TRUE,
-
-
     write_files = FALSE,
     orig_data_only = TRUE
 )
+
+# 
+# surgeon not booked to same slot currently
+dfs_list$case_df %>% as_tibble() %>% group_by(services, Date, weeks) %>% count(surgeon) 
 
 # View(dfs_list$block_df)
 View(dfs_list$case_df) ## SCHEDULING A LOT OF SIM CASES EARLY ON WITH CURRENT SIM FRAMEWORK
@@ -98,10 +114,11 @@ case_counts_per_month <- count_cases_per_month(case_df = dfs_list$case_df)
 View(count_cases_to_date(dfs_list$case_df, date = as.Date("2021-01-01")))
 
 ## PLOT BURNDOWN PER SERVICE
-plot_burndown_per_service(in_sched_raw = an_sched_out)
+plot_burndown_per_service(in_sched_raw = an_sched_out,  phase_dates_xlsx = "PhaseDates_v2_20201210.xlsx")
 
 # plot_post_op_dest(day_df = dfs_list$day_df, end_date = "2020-09-01")
 plot_post_op_dest(day_df = dfs_list$day_df)
+
 
 
 plot_inpt_post_op_dest(day_df = dfs_list$day_df, dow = FALSE)

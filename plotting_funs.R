@@ -216,12 +216,16 @@ plot_burndown_per_service <- function(in_sched_raw, phase_dates_xlsx = "PhaseDat
     theme_light(base_size = 20)
   )
   ggplot(plot_df$day_df, aes(x = date, y = remaining_cases)) +
-    geom_line(lwd = 1.1, aes(col = services, lty = services)) +
+    geom_line(lwd = 0.8, aes(col = services, lty = services), alpha = 0.8) +
+    # geom_point(aes(col = services), alpha = 0.8) + 
     xlab("Date") +
     ylab("Number of Cases on List") +
     geom_vline(xintercept = as.Date(phase_dates_infile$"Phase4"), col = "red", lty = 2, lwd = 1.2) +
     geom_vline(xintercept = as.Date(phase_dates_infile$"Phase5"), col = "red", lty = 2, lwd = 1.2) +
-    geom_vline(xintercept = as.Date(phase_dates_infile$"Phase6"), col = "red", lty = 2, lwd = 1.2)
+    geom_vline(xintercept = as.Date(phase_dates_infile$"Phase6"), col = "red", lty = 2, lwd = 1.2) +
+    geom_vline(xintercept = as.Date(phase_dates_infile$"Phase7"), col = "red", lty = 2, lwd = 1.2) +
+    geom_vline(xintercept = as.Date(phase_dates_infile$"Phase8"), col = "red", lty = 2, lwd = 1.2)   +
+    geom_vline(xintercept = as.Date(phase_dates_infile$"Phase9"), col = "red", lty = 2, lwd = 1.2)
 }
 
 ## plot number of patients going to each post-op destination
