@@ -1,5 +1,8 @@
 library(readxl)
-
+# These are the main functions needed to run the scheduler, more specifically
+# run_scheduler()
+# make_multi_perservice_sched
+# make_single_service_sched
 
 # Run scheduler 
   # input: WTIS and make phase schedule (WHAT ARE THESE OBJECTS AFTER PRE-PROCESSING??)
@@ -40,6 +43,7 @@ library(readxl)
 #' @param high_pri_prop float, proportion of high priority cases to add when simulating cases being added to the model
 #' @param home_only bool, whether to make a schedule only for same-day cases
 #' @param max_time NULL/int, only include procedures < a certain length in minutes
+#' @param surg_opts str, constraints by surgeon. options are 'first', 'first-owner', 'input_sched'
 #' @return List of ..... 
 #' @examples
 run_scheduler <- function(wtis_in = "WTIS 20200615.xlsx", 
@@ -57,7 +61,8 @@ run_scheduler <- function(wtis_in = "WTIS 20200615.xlsx",
                           add_cases = FALSE, 
                           high_pri_prop = 0.5, 
                           home_only = FALSE, 
-                          max_time = NULL 
+                          max_time = NULL,
+                          surg_opts = NULL #TODO: add arguments
 ) {
 
   # browser()
@@ -77,10 +82,13 @@ run_scheduler <- function(wtis_in = "WTIS 20200615.xlsx",
 
   names(wtis_sub) <- c("ID", "Surgeon", "Time", "Service", "PCATS", "InWindow", "PostOPDest", "Case.Procedures", "Patient.Class")
   wtis_sub$Service[wtis_sub$Service == "Orthopedics"] <- "Orthopaedics"
+  # browser()
   wtis_sub <- wtis_sub[complete.cases(wtis_sub), ] ## may need to comment this at some point -- if there is any missing data in the selected columns, they will be dropped
   wtis_sub <- wtis_sub[wtis_sub$Service != "Cardiovascular", ]
   wtis_sub <- wtis_sub[wtis_sub$Service %in% unlist(services), ]
   wtis_sub <- wtis_sub[order(wtis_sub$PCATS, wtis_sub$InWindow), ]
+
+  # if(verbose_run){print(wtis_sub)}
 
   # ----- PREDICT TIME OR USE SURGEON INPUT TIME AS CASE TIME VARIABLE -------
   if (time == "anesthesia") {
@@ -130,13 +138,19 @@ run_scheduler <- function(wtis_in = "WTIS 20200615.xlsx",
     rotating_services = rotating_services
   )
 
+  # browser()
+  # store week number
+
+
+
   per_serv_sched <- make_multi_perservice_sched(
     all_cases = in_dat,
     phase_block_sched = phase_sched,
     start_date = start_date,
     verbose_run = verbose_run,
     services = services,
-    turnover_buffer = turnover_buffer
+    turnover_buffer = turnover_buffer,
+    surg_opts = surg_opts, # PASS IN
   )
 
   names(per_serv_sched) <- unlist(services)
@@ -236,7 +250,9 @@ make_multi_perservice_sched <- function(all_cases, ## waitlist
                                           "Ophthalmology", "Orthopaedics",
                                           "Gynaecology", "Plastics",
                                           "Urology", "Dentistry"
-                                        )) {
+                                        ),
+                                        surg_opts = NULL
+                                        ) {
 
 
   # take elements of the named list                                        
@@ -253,12 +269,13 @@ make_multi_perservice_sched <- function(all_cases, ## waitlist
     service_cases <- all_cases[grep(pattern = service, x = all_cases$Service), ]
     service_cases <- service_cases[order(service_cases$PCATS, service_cases$InWindow, service_cases$Surgeon), ]
 
-    service_schedule <- make_single_service_sched(
+    service_schedule <- make_single_service_sched_refactor(
       start_date = start_date,
       weekly_block_mat = service_block,
       phase_dates = phase_dates,
       in_case_list = service_cases,
-      turnover_buffer = turnover_buffer
+      turnover_buffer = turnover_buffer,
+      surg_opts = surg_opts
     )
     return(service_schedule)
   })
@@ -281,15 +298,18 @@ make_multi_perservice_sched <- function(all_cases, ## waitlist
 
 # maybe more than one block type in a day 
 
-# 
-make_single_service_sched <- function(turnover_buffer = 25, 
+
+
+
+make_single_service_sched_refactor <- function(turnover_buffer = 25, 
                                       start_date = NULL, 
                                       weekly_block_mat = NULL, 
                                       phase_dates = NULL, 
                                       in_case_list = NULL, 
                                       in_sched = NULL, 
                                       verbose = TRUE,
-                                      BF = TRUE 
+                                      BF = TRUE ,
+                                      surg_opts = NULL
 ) {
   cases_scheduled <- c()
 
@@ -300,16 +320,15 @@ make_single_service_sched <- function(turnover_buffer = 25,
   if (is.null(weekly_block_mat)) {
     return("Please enter weekly_block_mat to create schedule")
   } else if (is.null(in_case_list)) {
-    return("Please enter list of cases to create scedule")
+    return("Please enter list of cases to create schedule")
   } else if (is.null(phase_dates)) {
-    return("Please enter phase_dates to create scedule")
+    return("Please enter phase_dates to create schedule")
   } else {
     if (is.null(in_sched)) {
       ## initialize schedule
-      ## makes an empty week to fill up with actual booked cases
-      # composed of weeks, 
+      ## makes an empty week to fill up with actual booked cases, composed of weeks, 
       ## creates pink sector of slide 3, starts with 1 day
-      # 
+      # browser()
       sched_list <- list(make_week(
         weekly_block_matrix = weekly_block_mat,
         start_date = start_date,
@@ -320,22 +339,26 @@ make_single_service_sched <- function(turnover_buffer = 25,
       sched_list <- in_sched
     }
 
-
     in_case_list <- in_case_list[complete.cases(in_case_list), ]
+     
+    # while(nrow(in_case_list) > 0){
 
-    # browser()
-
+        # browser()
     for (my_row in 1:nrow(in_case_list)) {
 
-      if (length(in_case_list[my_row, "ID"]) == 0) {
-        if (verbose) {
-          print("Missing row passed")
-        }
-      } else if (is.na(in_case_list[my_row, "ID"])) {
-        if (verbose) {
-          print("Missing row passed")
-        }
-      } else {
+      # if (length(in_case_list[my_row, "ID"]) == 0) {
+      #   if (verbose) {
+      #     print("Missing row passed")
+      #   }
+      # } else if (is.na(in_case_list[my_row, "ID"])) {
+      #   if (verbose) {
+      #     print("Missing row passed")
+      #   }
+      # } else {
+
+
+        current_case <- in_case_list[my_row, ]
+
         my_case_list <- make_case_list(
           case_id = unlist(in_case_list[my_row, "ID"]),
           case_length = unlist(in_case_list[my_row, "time"]),
@@ -346,42 +369,50 @@ make_single_service_sched <- function(turnover_buffer = 25,
           turnover_buffer = turnover_buffer
         )
         if (verbose) {
-          print(paste0("Finding block for Case ID: ", my_case_list$case_id))
+          cat(paste0("Finding block for Case ID: ", my_case_list$case_id, '\n'))
         }
+
+        if (is.na(my_case_list$case_id)) {browser()}
         # outputs NA if there is no opening 
+
         open_block_update <- find_bf_open_block(case_list = my_case_list, 
+                                                surg_opts = surg_opts,
                                                 block_schedule = sched_list)
-        # ^ list w/ openings
 
-        # both functions below will return a booked case 
-        if (!is.na(open_block_update[[1]])) { # this actually checks week 
-          # outputs schedule with the case booked in 
-          # the more common ...
-
-          if(verbose){ print("\tOpen block found in schedule, adding case..")}
-          # if (my_row %% 5 == 0) {browser()}
-          sched_list <- add_case(case_list = my_case_list, 
-                                  block_schedule = sched_list, 
-                                  block_update = open_block_update)
-            
-        } else {
-          
+        # re-factored so the end result is add_case regardless of what find_bf_open_block returns
+        if (is.na(open_block_update[[1]])) {  # this actually checks week
           # updates the schedule list to have more days 
           # days added to schedule until -> open block that is suitable for the case 
           # also schedules the case 
           # one case per block (orthopaedics is most common for this)
-          if(verbose){ print("\tNo open block found in schedule, adding days until block available for case..")}
-          #if ((my_row) == 15) {browser()}
-          sched_list <- add_case_block_refactor(case_list = my_case_list, 
+
+          if(verbose){ cat("\tNo open block found in schedule, adding days until block available for case..\n")}
+          # if (my_row %% 5 == 0) {browser()}
+          # now returns a list of two objects, one which is an updated schedule to add the case and 
+          # an non-NA object identical to what is returned by find_bf_open_block, that we can pass into add_case
+          new_stuff <- add_case_block_refactor(case_list = my_case_list, 
                                       block_schedule = sched_list, 
                                       service_block_matrix = weekly_block_mat, 
                                       phase_dates = phase_dates)
-        }
+
+          open_block_update <- new_stuff[['block_update_list']]
+          sched_list <- new_stuff[['block_schedule_out']]   # aka block_schedule              
+          # browser()
+        } 
+        # add_case 
+        sched_list <- add_case(case_list = my_case_list, 
+                        block_schedule = sched_list, 
+                        block_update = open_block_update
+                        )
 
         if (verbose) {
           print(paste0("Case ID: ", my_case_list$case_id, " added to schedule."))
+  
         }
         cases_scheduled <- c(cases_scheduled, my_case_list$case_id)
+        # DELVIN - DELETE ROW FROM IN CASE LIST AND COMPARE
+        # in_case_list[1:5,] %>% as_tibble()
+        # in_case_list <- in_case_list[-1, ] 
       }
     }
 
@@ -389,7 +420,6 @@ make_single_service_sched <- function(turnover_buffer = 25,
 
     return(out_list)
   }
-}
 
 
 
@@ -676,7 +706,29 @@ make_phase_sched <- function(phase_dates_xlsx, ## Excel file with phase dates
 ##  thus we should have a "service" argument as well
 prep_block_matrix <- function(block_matrix ## matrix of block availabilities
 ) {
+
+  block_matrix$relevant_weeks = "all"
+
+  block_matrix <- 1:nrow(block_matrix) %>%
+    map_dfr(function(row){
+
+      bt <- block_matrix[row, ]$block_length
+      comma_detected = (stringr::str_detect(bt, '\\,'))
+      print(comma_detected)
+
+      if (comma_detected){
+        block_matrix$relevant_weeks[[row]] <- as.character(stringr::str_extract_all(bt,  "(?<=\\().+?(?=\\))"))
+        block_matrix$block_length[[row]] <- stringr::str_split_fixed(bt, " ", n = 2)[, 1]
+      }
+
+      return(block_matrix[row, ])
+    })
+
+
+    
   block_matrix$block_length_mins <- as.numeric(block_matrix$block_length) * 60
+
+  # if(is.na(block_matrix$block_length_mins)){browser()}
   block_matrix$block_type <- paste0("T", block_matrix$block_length, "h")
   block_matrix$weekend <- FALSE
   block_matrix$daycare <- FALSE
@@ -691,6 +743,8 @@ prep_block_matrix <- function(block_matrix ## matrix of block availabilities
     "blocks_per_day" = blocks_per_day,
     "updated_block_matrix" = block_matrix
   )
+
+  # print(block_matrix)
   return(out_list)
 }
 
@@ -719,8 +773,7 @@ make_service_daily_block_mat <- function(service, phase_sched, rotating_services
     day_hours <- as.matrix(table(na.omit(service_sched[, day])))
 
     if (length(day_hours) > 0) { ## check that any blocks are scheduled
-      block_mat <- prep_block_matrix(block_matrix = data.frame(blocks_per_week = day_hours,
-      block_length = rownames(day_hours)
+      block_mat <- prep_block_matrix(block_matrix = data.frame(blocks_per_week = day_hours, block_length = rownames(day_hours)
       ))$updated_block_matrix
     } else { ## otherwise no block matrix
       block_mat <- NA
@@ -740,7 +793,8 @@ make_service_daily_block_mat <- function(service, phase_sched, rotating_services
     daily_sched[["DAYCARE"]] <- NA
   }
 
-  names(daily_sched) <- days_of_week
+  # if (length(names(daily_sched)) != length(days_of_week)) {browser()}
+  names(daily_sched) <- days_of_week[1:5]
   # print(daily_sched)
   return(daily_sched)
 }

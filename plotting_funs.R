@@ -1,4 +1,10 @@
 
+
+# with surgeon constraint. comparison is b/w anesthesia and procedure   
+  # get spreadsheet_per_service_sched -> boxplot_block_times_vs_booked 
+  # plot_inpt_post_op_dest 
+
+
 # ---- plot ---
 ## plot the number of cases seen in the block schedule by week
 plot_cases_by_week <- function(block_list) {
