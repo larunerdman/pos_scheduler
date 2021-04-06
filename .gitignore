@@ -1,5 +1,6 @@
-presentations  # Lauren's presentations
-POS-master   # og repo
+presentations/  # Lauren's presentations
+POS/  # og repo
+documents
 Scheduler_Input_Data/*
 **Rproj**
 **.Rhistory
