@@ -101,8 +101,11 @@ make_week <- function(weekly_block_matrix,
 
   week_num <- get_week_from_date(start_date)
   cat('\nWeek_num', week_num, '\n')
-  day_phase_block <- get_relevant_blocks(day_phase_block, week_num = week_num)
 
+  if(!is.na(day_phase_block )){ # this code is repeated in find_phase_date_block_mat..
+    day_phase_block <- get_relevant_blocks(day_phase_block, week_num = week_num)
+  }
+  
   # if (length(relevant_week_found) > 2 & !all(relevant_week_found)){
   #   browser()
   # }
