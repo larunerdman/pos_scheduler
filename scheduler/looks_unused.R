@@ -68,3 +68,135 @@ get_mean_cases_per_day <- function(sched_list, ## schedule list
     return(mean(na.omit(day_counts)))
   }
 }
+
+
+## make a daycare blcok matrix -- this isn't used yet
+make_daycare_block_matrix <- function(service, daycare_sched, rotating_services) {
+  num_r_services <- length(rotating_services)
+  mods <- paste0("Mod", ((1:num_r_services) - 1))
+  splits <- paste0("Split", ((1:num_r_services)))
+
+  weekend_blocks <- as.numeric(na.omit(as.character(unlist(daycare_sched[daycare_sched[, 1] == "Weekend daycare", 2:6]))))
+  weekend_split <- lapply(split(x = weekend_blocks, f = 1:num_r_services), function(y) {
+    ifelse(length(y) > 0, y, NA)
+  })
+  names(weekend_split) <- splits
+
+  weekday_blocks <- as.numeric(na.omit(as.character(unlist(daycare_sched[daycare_sched[, 1] == "Weekly daycare", 2:6]))))
+  weekday_split <- lapply(split(x = weekday_blocks, f = 1:num_r_services), function(y) {
+    ifelse(length(y) > 0, y, NA)
+  })
+  names(weekday_split) <- rev(splits)
+
+  service_idx <- which(rotating_services == service)
+  idx_vec <- c(1:num_r_services, 1:num_r_services)
+  daycare_block_mat_list <- sapply(mods, function(mod) {
+    mod_num <- as.numeric(substr(x = mod, start = 4, stop = 4))
+    sched_idx <- idx_vec[(service_idx + mod_num)]
+
+    if (!is.na(weekday_split[[paste0("Split", sched_idx)]])) {
+      weekday_vec <- table(weekday_split[[paste0("Split", sched_idx)]])
+      weekday_block_mat <- data.frame(
+        blocks_per_week = weekday_vec,
+        block_length = as.numeric(names(weekday_vec)),
+        block_length_mins = as.numeric(names(weekday_vec)) * 60,
+        block_type = paste0("T", names(weekday_vec), "h"),
+        weekend = rep(FALSE, length(weekday_vec))
+      )
+    } else {
+      weekday_block_mat <- data.frame(
+        blocks_per_week = c(),
+        block_length = c(),
+        block_length_mins = c(),
+        block_type = c(),
+        weekend = c()
+      )
+    }
+    if (!is.na(weekend_split[[paste0("Split", sched_idx)]])) {
+      weekend_vec <- table(weekend_split[[paste0("Split", sched_idx)]])
+      weekend_block_mat <- data.frame(
+        blocks_per_week = weekend_vec,
+        block_length = as.numeric(names(weekend_vec)),
+        block_length_mins = as.numeric(names(weekend_vec)) * 60,
+        block_type = paste0("T", names(weekend_vec), "h"),
+        weekend = rep(TRUE, length(weekend_vec))
+      )
+    } else {
+      weekend_block_mat <- data.frame(
+        blocks_per_week = c(),
+        block_length = c(),
+        block_length_mins = c(),
+        block_type = c(),
+        weekend = c()
+      )
+    }
+
+
+    all_daycare_blocks <- data.frame(rbind(weekday_block_mat, weekend_block_mat))
+
+    return(all_daycare_blocks)
+  })
+
+  return(daycare_block_mat_list)
+}
+
+
+## make a daycare blcok matrix -- this isn't used yet
+make_daycare_block_matrix = function(service,daycare_sched,rotating_services){
+  
+  num_r_services = length(rotating_services)
+  mods = paste0("Mod",((1:num_r_services)-1))
+  splits = paste0("Split",((1:num_r_services)))
+  
+  weekend_blocks = as.numeric(na.omit(as.character(unlist(daycare_sched[daycare_sched[,1] == "Weekend daycare",2:6]))))
+  weekend_split = lapply(split(x = weekend_blocks,f = 1:num_r_services),function(y){ifelse(length(y) > 0,y,NA)})
+  names(weekend_split) = splits
+  
+  weekday_blocks = as.numeric(na.omit(as.character(unlist(daycare_sched[daycare_sched[,1] == "Weekly daycare",2:6]))))
+  weekday_split = lapply(split(x = weekday_blocks,f = 1:num_r_services),function(y){ifelse(length(y) > 0,y,NA)})
+  names(weekday_split) = rev(splits)
+
+  service_idx = which(rotating_services == service)
+  idx_vec = c(1:num_r_services,1:num_r_services)
+  daycare_block_mat_list = sapply(mods, function(mod){
+    mod_num = as.numeric(substr(x = mod,start = 4,stop = 4))
+    sched_idx = idx_vec[(service_idx + mod_num)]
+    
+    if(!is.na(weekday_split[[paste0("Split",sched_idx)]])){
+      weekday_vec = table(weekday_split[[paste0("Split",sched_idx)]])
+      weekday_block_mat = data.frame(blocks_per_week = weekday_vec,
+                                     block_length = as.numeric(names(weekday_vec)),
+                                     block_length_mins = as.numeric(names(weekday_vec))*60,
+                                     block_type = paste0("T",names(weekday_vec),"h"),
+                                     weekend = rep(FALSE,length(weekday_vec)))      
+    } else{
+      weekday_block_mat = data.frame(blocks_per_week = c(),
+                                     block_length = c(),
+                                     block_length_mins = c(),
+                                     block_type = c(),
+                                     weekend = c())
+    }
+    if(!is.na(weekend_split[[paste0("Split",sched_idx)]])){
+      weekend_vec = table(weekend_split[[paste0("Split",sched_idx)]])
+      weekend_block_mat = data.frame(blocks_per_week = weekend_vec,
+                                     block_length = as.numeric(names(weekend_vec)),
+                                     block_length_mins = as.numeric(names(weekend_vec))*60,
+                                     block_type = paste0("T",names(weekend_vec),"h"),
+                                     weekend = rep(TRUE,length(weekend_vec)))      
+    } else{
+      weekend_block_mat = data.frame(blocks_per_week = c(),
+                                     block_length = c(),
+                                     block_length_mins = c(),
+                                     block_type = c(),
+                                     weekend = c())      
+    }
+    
+    
+    all_daycare_blocks = data.frame(rbind(weekday_block_mat,weekend_block_mat))
+    
+    return(all_daycare_blocks)
+  })
+  
+  return(daycare_block_mat_list)
+  
+}
