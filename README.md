@@ -3,6 +3,8 @@
 
 All credits to Lauren Erdman for the original code.
 
+Code is currently functional but additional documentation and docstrings would be helpful for external users.
+
 ## Modifications
 
 Generally speaking, some modifications I've made include 
