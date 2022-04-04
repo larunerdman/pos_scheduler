@@ -273,7 +273,7 @@ get_spreadsheet_per_service_sched <- function(in_sched_raw,
         }
       }
     }
-    # browser()
+    browser()
     day_df <- data.frame(
       services, weeks, as.Date(date, origin = "1970-01-01"),
       no_blocks, n_cases, cases_length, picu_oicu, constant_obs, in_patient, short_stay, cccu,

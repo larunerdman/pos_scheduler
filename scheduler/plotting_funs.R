@@ -234,6 +234,21 @@ plot_burndown_per_service <- function(in_sched_raw, phase_dates_xlsx = "PhaseDat
     geom_vline(xintercept = as.Date(phase_dates_infile$"Phase9"), col = "red", lty = 2, lwd = 1.2)
 }
 
+## PLOT BURNDOWN FROM DAY DF
+plot_burndown_per_service_from_day_df <- function(day_df) {
+  require(ggplot2)
+  
+  theme_set(
+    theme_light(base_size = 20)
+  )
+  ggplot(day_df, aes(x = date, y = remaining_cases, col = services)) +
+    geom_line(lwd = 0.8, aes(lty = services), alpha = 0.8) +
+    # geom_point(aes(col = services), alpha = 0.8) + 
+    xlab("Date") +
+    ylab("Number of Cases on List")
+}
+
+
 ## plot number of patients going to each post-op destination
 plot_post_op_dest <- function(day_df,
                               end_date = NULL) {
@@ -254,25 +269,23 @@ plot_post_op_dest <- function(day_df,
   })
 
   counts <- c(
+    inpatient_counts,
     picu_oicu_counts,
     const_obs_counts,
-    inpatient_counts,
-    short_stay_counts,
-    cccu_counts
+    short_stay_counts
   )
   labels <- c(
+    rep("inpatient", length(inpatient_counts)),
     rep("picu_oicu", length(picu_oicu_counts)),
     rep("const_obs", length(const_obs_counts)),
-    rep("inpatient", length(inpatient_counts)),
-    rep("short_stay", length(short_stay_counts)),
-    rep("cccu", length(cccu_counts))
+    rep("short_stay", length(short_stay_counts))
   )
-  post_op_days <- rep(unique(dfs_list$day_df$date), 5)
+  post_op_days <- rep(unique(day_df$date), length(unique(labels)))
 
   post_op_df <- data.frame(counts, labels, post_op_days)
   post_op_df$labels_fac <- factor(post_op_df$labels,
-    levels = c("picu_oicu", "const_obs", "inpatient", "short_stay", "cccu"),
-    labels = c("PICU/OICU", "Constant Obs", "In-patient", "Short Stay", "CCCU")
+    levels = c("inpatient","picu_oicu", "const_obs",  "short_stay"),
+    labels = c("In-patient", "PICU/OICU", "Constant Obs",  "Short Stay")
   )
 
   if (is.null(end_date)) {
@@ -280,9 +293,10 @@ plot_post_op_dest <- function(day_df,
       geom_bar(stat = "identity", position = "dodge") +
       facet_grid(~labels_fac) +
       theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
-      xlab("Date") +
+      xlab("Date") + 
+      geom_vline(xintercept = as.Date("2022-01-01"), col = "red", lty = 2, lwd = 1.2) +
       ylab("Number of patients") +
-      scale_fill_manual(values = c("PICU/OICU" = "orangered", "Constant Obs" = "deeppink2", "In-patient" = "darkorchid", "Short Stay" = "seagreen", "CCCU" = "dodgerblue"), name = "Post-Op \nDestination")
+      scale_fill_manual(values = c("In-patient" = "darkorchid","PICU/OICU" = "orangered", "Constant Obs" = "deeppink2",  "Short Stay" = "seagreen"), name = "Post-Op \nDestination")
   } else {
     post_op_df_2mo <- post_op_df[post_op_df$post_op_days < "2020-09-01", ]
     head(post_op_df_2mo)
@@ -293,7 +307,7 @@ plot_post_op_dest <- function(day_df,
       theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
       xlab("Date") +
       ylab("Number of patients") +
-      scale_fill_manual(values = c("PICU/OICU" = "orangered", "Constant Obs" = "deeppink2", "In-patient" = "darkorchid", "Short Stay" = "seagreen", "CCCU" = "dodgerblue"), name = "Post-Op \nDestination")
+      scale_fill_manual(values = c("In-patient" = "darkorchid", "PICU/OICU" = "orangered", "Constant Obs" = "deeppink2", "Short Stay" = "seagreen"), name = "Post-Op \nDestination")
   }
 }
 
@@ -306,23 +320,26 @@ boxplot_block_times_vs_booked <- function(my_block_df, ## dataframe from block s
   my_block_df$block_length_hrs <- my_block_df$block_length / 60
 
   names(my_block_df)[3] <- "Date"
+  
+  # browser()
+  my_block_df$block_type[grep(pattern =  "T9.5 ",x = my_block_df$block_type)] = "T9.5h"
 
   ggplot(my_block_df, aes(x = block_type_length, y = block_length)) +
     geom_point() +
     geom_abline(slope = 1, intercept = 0)
 
   if (make_boxplot) {
-    ggplot(my_block_df, aes(y = block_length_hrs, x = block_type)) +
+   my_boxplot = ggplot(my_block_df, aes(y = block_length_hrs, x = block_type)) +
       geom_boxplot(aes(fill = block_type)) +
-      scale_fill_manual(values = c(
-        "T4h" = "black",
-        "T5h" = "blue", "T6h" = "dodgerblue",
-        "T7.5h" = "deeppink2", "T8.5h" = "deeppink4",
-        "T9.5h" = "darkorchid4"
-      ), name = "Block") +
       xlab("Block") +
       ylab("Block cases length (hours)")
-  }
+   
+   if(!is.null(my_block_df$Schedule)){
+     my_boxplot = my_boxplot + facet_grid(~Schedule)
+   }
+   
+   plot(my_boxplot)
+  } 
 }
 
 ## plot inpatient post-op destinations

@@ -20,7 +20,7 @@ library(readxl)
 #'
 #' @param wtis_in str, name of waitlist excel sheet.
 #' @param sub_n int,  subsets waitlist UP TO this row number.
-#' @param case_ids vector, case_ids‚àè
+#' @param case_ids vector, case_ids‚
 #' @param phase_dates_xlsx str, simple spreadsheet with columns saying "Phase 4", ... and dates below
 #' @param phase_list_xlsx vector: str, phase excel sheets whose order must match phase_dates_xlsx (???????)
 #' @param resample_xlsx str, Not relevant at the moment -- parameters for resampling
@@ -73,6 +73,9 @@ run_scheduler <- function(wtis_in,
   }
   ## ---- PREP WTIS ----
   wtis <- data.frame(read_excel(wtis_in, sheet = 1))
+  
+  print(names(wtis))
+  
   if (home_only) {
     wtis_sub <- wtis[
       wtis$Patient.Class == "Outpatient Surgical Day Care",
@@ -88,6 +91,9 @@ run_scheduler <- function(wtis_in,
       "PCATS.Priority", "In.Window", "Planned.Post.op.Destination", "Case.Procedures", "Patient.Class"
     )] # [complete.cases(wtis[,c("WTIS.ID","Length..minutes.","Service","WTIS.Priority")]),]
   }
+  
+  print(head(wtis_sub))
+  
 
   names(wtis_sub) <- c("ID", "Surgeon", "Time", "Service", "PCATS", "InWindow", "PostOPDest", "Case.Procedures", "Patient.Class")
   wtis_sub$Service[wtis_sub$Service == "Orthopedics"] <- "Orthopaedics"
@@ -100,7 +106,7 @@ run_scheduler <- function(wtis_in,
   # if(verbose_run){print(wtis_sub)}
 
   # ----- PREDICT TIME OR USE SURGEON INPUT TIME AS CASE TIME VARIABLE -------
-
+  
 
   if (time == "anesthesia") {
     wtis_sub$time <- pred_wtis_an_time(
@@ -631,3 +637,4 @@ make_proc_df <- function(case_id_vec, proc_vec) {
 
   return(proc_df)
 }
+
