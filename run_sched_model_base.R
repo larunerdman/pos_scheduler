@@ -3,6 +3,9 @@ setwd("C:/Users/lauren erdman/Desktop/MLCore/pos_scheduler/")
 
 base_dir = "C:/Users/lauren erdman/Desktop/MLCore/pos_scheduler/"
 
+data_dir = "C:/Users/lauren erdman/OneDrive - SickKids/"
+
+
 library(readxl)
 library(dplyr)
 library(lubridate)
@@ -20,9 +23,7 @@ source(paste0(base_dir,"/scheduler/test_funs.R"))
 
 {
   options <- c("all")
-  # phase_dates_xlsx <- "OPTIMISE_09-27-2021/phase_dates_10-2021.xlsx"
-  # phase_dates_xlsx <- "PhaseDates_v3_20220328.xlsx"
-  phase_dates_xlsx <- "PhaseDates_v4_20220517.xlsx"
+  phase_dates_xlsx <- paste0(data_dir,"/example_data/PhaseDates.xlsx")
   services <- list(
     "General", "Otolaryngology",
     "Ophthalmology",
@@ -39,8 +40,8 @@ source(paste0(base_dir,"/scheduler/test_funs.R"))
   )
   pacu_target <- 18
   
-  ## @Lauren: update this file 
-  wtis_in <- paste0(base_dir,"/OPTIMISE_09-27-2021/SK Waitlist 05 19 2022_sub.xlsx")
+  # this waitlist is simulated
+  wtis_in <- paste0(data_dir,"/example_data/Waitlist_DEID.xlsx")
   turnover_buffer <- 25
 }
 
@@ -48,24 +49,17 @@ source(paste0(base_dir,"/scheduler/test_funs.R"))
 # ------- run the scheduler -------
 set.seed(2021)
 
-strat15_sched = paste0(base_dir,"/OPTIMISE_09-27-2021/",c("Strategy1-5Sched_JanApr_20220506.xlsx","Strategy1-5Sched_AprJul_20220506.xlsx",
-                                                          "Strategy1-5Sched_JulSept_20220506.xlsx","Strategy1-5Sched_SeptDec_20220506.xlsx",
-                                                          "Strategy1-5Sched_JanApr_20220506.xlsx","Strategy1-5Sched_AprJul_20220506.xlsx"))
+## schedules to compare with scheduler
+sched = paste0(data_dir,"/example_data/",c("Sched_JanApr.xlsx","Sched_AprJul.xlsx","Sched_JulSept.xlsx","Sched_SeptDec.xlsx",
+                                                          "Sched_JanApr.xlsx","Sched_AprJul.xlsx"))
 
-# options = list(baseline_sched, strat1_sched,
-#                strat2_sched, strat3_sched,
-#                strat4_sched, strat5_sched)
+sched_compare = paste0(data_dir,"/example_data/",c("Sched_JanApr_compare.xlsx","Sched_AprJul_compare.xlsx",
+                                                   "Sched_JulSept_compare.xlsx","Sched_SeptDec_compare.xlsx",
+                                                  "Sched_JanApr_compare.xlsx","Sched_AprJul_compare.xlsx"))
 
-options = list(strat15_sched)
+options = list(sched, sched_compare)
 
-# options <- list(rep(paste0(base_dir,"/OPTIMISE_09-27-2021/PhaseX_April2022_baseline.xlsx"), 6),
-#                 rep(paste0(base_dir,"/OPTIMISE_09-27-2021/PhaseX_April2022_addedblocks.xlsx"), 6),
-#                 rep(paste0(base_dir,"/OPTIMISE_09-27-2021/PhaseX_April2022_addedblocks_9.5hr.xlsx"), 6),
-#                 rep(paste0(base_dir,"/OPTIMISE_09-27-2021/PhaseX_April2022_addedblocks_9.5hr_3blocks.xlsx"), 6))
-
-
-# options = list(rep(paste0(base_dir,"/OPTIMISE_09-27-2021/PhaseX_Oct2021_3blocks_9.5blocks.xlsx"), 6))
-
+## Run scheduler for each schedule
 sched_compare <- 1:length(options) %>%
   map(function(idx) {
     print(options[[idx]])
@@ -104,8 +98,8 @@ sched_compare <- 1:length(options) %>%
     return(res)
   })
 
-# sched_compare %>% map(~ plot_burndown_per_service(in_sched_raw = .x,phase_dates_xlsx = phase_dates_xlsx))
 
+## extract data frame structured schedules from list of schedules
 spreadsheets <- sched_compare %>%
   map(~ get_spreadsheet_per_service_sched(
     in_sched_raw = .x,
@@ -116,47 +110,33 @@ spreadsheets <- sched_compare %>%
     orig_data_only = TRUE
   ))
 
-# saveRDS(object = spreadsheets[[1]]$day_df, paste0(base_dir,"/baseline_day_df_20220531.rds"))
-# saveRDS(object = spreadsheets[[2]]$day_df, paste0(base_dir,"/strategy1_day_df_20220531.rds"))
-# saveRDS(object = spreadsheets[[3]]$day_df, paste0(base_dir,"/strategy2_day_df_20220531.rds"))
-# saveRDS(object = spreadsheets[[4]]$day_df, paste0(base_dir,"/strategy3_day_df_20220531.rds"))
-# saveRDS(object = spreadsheets[[5]]$day_df, paste0(base_dir,"/strategy4_day_df_20220531.rds"))
-# saveRDS(object = spreadsheets[[6]]$day_df, paste0(base_dir,"/strategy5_day_df_20220531.rds"))
+## should = number of schedules 
+length(spreadsheets)
 
-# saveRDS(object = spreadsheets[[1]]$day_df, paste0(base_dir,"/strategy1-5_day_df_20220531.rds"))
+## 3 schedule data frames at different levels of summarization by row:
+##  per-block
+##  per-day
+##  per-case 
+names(spreadsheets[[1]])
 
-# write.csv(spreadsheets[[1]]$day_df, paste0(base_dir,"/baseline_day_df_20220531.csv"))
-# write.csv(spreadsheets[[2]]$day_df, paste0(base_dir,"/strategy1_day_df_20220531.csv"))
-# write.csv(spreadsheets[[3]]$day_df, paste0(base_dir,"/strategy2_day_df_20220531.csv"))
-# write.csv(spreadsheets[[4]]$day_df, paste0(base_dir,"/strategy3_day_df_20220531.csv"))
-# write.csv(spreadsheets[[5]]$day_df, paste0(base_dir,"/strategy4_day_df_20220531.csv"))
-# write.csv(spreadsheets[[6]]$day_df, paste0(base_dir,"/strategy5_day_df_20220531.csv"))
+###
+## Plot post-op destination
+###
 
-# write.csv(spreadsheets[[1]]$day_df, paste0(base_dir,"/strategy1-5_day_df_20220531.csv"))
-
-
-# saveRDS(object = spreadsheets[[1]], paste0(base_dir,"/april_2021_baseline_day_df_20220121.rds"))
-# saveRDS(object = spreadsheets[[2]], paste0(base_dir,"/april_2021_3addedblocks_day_df_20220121.rds"))
-# # saveRDS(object = spreadsheets[[3]], paste0(base_dir,"/jan_2022_added_blocks_day_df_no_sched_20220121.csv"))
-# saveRDS(object = spreadsheets[[3]], paste0(base_dir,"/april_2021_3addedblocks_9.5hr_20220121.rds"))
-# saveRDS(object = spreadsheets[[4]], paste0(base_dir,"/april_2021_6addedblocks_9.5hr_day_df_20220121.rds"))
-
-
-
-
-
+  ## From baseline schedule
 plot_post_op_dest(day_df = spreadsheets[[1]]$day_df)
 
-spreadsheets[[1]]$day_df %>% as_tibble() %>% plot_post_op_dest() + ggtitle('April 2021 Baseline')  + theme(plot.title = element_text(hjust = 0.5))
-spreadsheets[[2]]$day_df %>% as_tibble()  %>% plot_post_op_dest() + ggtitle('April 2021 Ramp-Up ')  + theme(plot.title = element_text(hjust = 0.5))
-# spreadsheets[[3]]$day_df %>% as_tibble()  %>% plot_post_op_dest() + ggtitle('Jan 2022 Ramp-Up') + theme(plot.title = element_text(hjust = 0.5))
-spreadsheets[[3]]$day_df %>% as_tibble()  %>% plot_post_op_dest() + ggtitle('April 2021 9.5hr Blocks') + theme(plot.title = element_text(hjust = 0.5))
-spreadsheets[[4]]$day_df %>% as_tibble() %>% plot_post_op_dest() + ggtitle('April 2021 Ramp-Up \n+ 9.5hr Blocks')  + theme(plot.title = element_text(hjust = 0.5))
+  ## from comparitor schedule
+plot_post_op_dest(day_df = spreadsheets[[2]]$day_df)
 
-# spreadsheets %>% map(function(this_spreadsheet){
-#   
-#   plot_post_op_dest(this_spreadsheet$day_df)
-#   
-# })
-# plot_post_op_dest 
-# 
+
+###
+## Plot burndown
+###
+
+  ## from baseline schedule
+plot_burndown_per_service_from_day_df(day_df = spreadsheets[[1]]$day_df)
+
+  ## from comparitor schedule
+plot_burndown_per_service_from_day_df(day_df = spreadsheets[[2]]$day_df)
+

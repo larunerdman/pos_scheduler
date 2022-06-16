@@ -243,6 +243,20 @@ find_bf_open_block <- function(case_list,
             )))
             # get block in hours
             block_time <- readr::parse_number(block_type) * 60 + block_buffer
+
+            # cat("\nblock_buffer\n")
+            # cat(readr::parse_number(block_type) )
+            # 
+            # cat("\nblock_type\n")
+            # cat(block_type)
+            # 
+            # cat("\nblock_time\n")
+            # cat(block_time)
+            # 
+            # cat("\nblock_sum\n")
+            # cat(block_sum)
+
+
             # if the current block sum is less than the alotted block time
             if ((block_sum < block_time) & (block_sum > max_block_sum)) {
               new_short_long <- update_short_long(proc_len_vec = block_sum, block_time = block_time)
@@ -281,15 +295,27 @@ update_short_long <- function(proc_len_vec,
                               shortfall_threshold = 90,
                               long_time_threshold = 30) {
   block_len <- sum(proc_len_vec)
+  
+  # browser()
 
-  if (block_len < (block_time - shortfall_threshold)) {
-    short_long <- "short"
-  } else if (block_len > (block_time + long_time_threshold)) {
-    short_long <- "long"
-  } else {
-    short_long <- "full_block"
-  }
-  return(short_long)
+  # cat("\nblock_len\n")
+  # cat(block_len)
+  # cat("\nblock_time\n")
+  # cat(block_time)
+  # cat("\nshortfall_threshold\n")
+  # cat(shortfall_threshold)
+  
+  
+  
+  # if (block_len < (block_time - shortfall_threshold)) {
+  #   short_long <- "short"
+  # } else if (block_len > (block_time + long_time_threshold)) {
+  #   short_long <- "long"
+  # } else {
+  #   short_long <- "full_block"
+  # }
+  # return(short_long)
+  return(NA)
 }
 
 
