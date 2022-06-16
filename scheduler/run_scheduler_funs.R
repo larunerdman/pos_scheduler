@@ -74,7 +74,7 @@ run_scheduler <- function(wtis_in,
   ## ---- PREP WTIS ----
   wtis <- data.frame(read_excel(wtis_in, sheet = 1))
   
-  print(names(wtis))
+  # print(names(wtis))
   
   if (home_only) {
     wtis_sub <- wtis[
@@ -92,7 +92,7 @@ run_scheduler <- function(wtis_in,
     )] # [complete.cases(wtis[,c("WTIS.ID","Length..minutes.","Service","WTIS.Priority")]),]
   }
   
-  print(head(wtis_sub))
+  # print(head(wtis_sub))
   
 
   names(wtis_sub) <- c("ID", "Surgeon", "Time", "Service", "PCATS", "InWindow", "PostOPDest", "Case.Procedures", "Patient.Class")

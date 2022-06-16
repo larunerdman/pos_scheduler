@@ -83,6 +83,7 @@ sched_compare <- 1:length(options) %>%
       verbose_run = TRUE,
       turnover_buffer = turnover_buffer,
       time = "surgeon",
+      # time = "anesthesia", ## Lauren debug
       rotating_services = c("Opthalmology", "Orthopaedics", "Urology", "Otolaryngology"),
       add_cases = FALSE,
       high_pri_prop = 0.5,
