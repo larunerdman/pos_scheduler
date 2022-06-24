@@ -1,8 +1,10 @@
 # setwd("/Users/delvin/Documents/OneDrive - SickKids/scheduler/Scheduler_Input_Data/")
 setwd("C:/Users/lauren erdman/Desktop/MLCore/pos_scheduler/")
 
+## path to git repo
 base_dir = "C:/Users/lauren erdman/Desktop/MLCore/pos_scheduler/"
 
+## path to data
 data_dir = "C:/Users/lauren erdman/OneDrive - SickKids/"
 
 
@@ -28,7 +30,7 @@ source(paste0(base_dir,"/scheduler/test_funs.R"))
     "General", "Otolaryngology",
     "Ophthalmology",
     # "Gynaecology",
-    "Cardiovascular",
+    # "Cardiovascular",
     "Orthopaedics", "Plastics", "Urology", "Dentistry"
   )
   
@@ -38,7 +40,7 @@ source(paste0(base_dir,"/scheduler/test_funs.R"))
     "5C Step Down" = 3, "8C Step Down" = 2,
     "ICU" = 3
   )
-  pacu_target <- 18
+  pacu_target <- 45 ## this is overall
   
   # this waitlist is simulated
   wtis_in <- paste0(data_dir,"/example_data/Waitlist_DEID.xlsx")
@@ -60,7 +62,7 @@ sched_compare = paste0(data_dir,"/example_data/",c("Sched_JanApr_compare.xlsx","
 options = list(sched, sched_compare)
 
 ## Run scheduler for each schedule
-sched_compare <- 1:length(options) %>%
+sched_compare_out <- 1:length(options) %>%
   map(function(idx) {
     print(options[[idx]])
     
@@ -101,7 +103,7 @@ sched_compare <- 1:length(options) %>%
 
 
 ## extract data frame structured schedules from list of schedules
-spreadsheets <- sched_compare %>%
+spreadsheets <- sched_compare_out %>%
   map(~ get_spreadsheet_per_service_sched(
     in_sched_raw = .x,
     per_block = TRUE,

@@ -149,7 +149,7 @@ run_scheduler <- function(wtis_in,
     phase_dates_xlsx = phase_dates_xlsx,
     phase_list = phase_list_xlsx,
     services = services,
-    rotating_services = rotating_services
+    rotating_services = rotating_services ## to be added in completion
   )
 
   # browser()

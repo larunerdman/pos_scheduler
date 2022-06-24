@@ -307,15 +307,15 @@ update_short_long <- function(proc_len_vec,
   
   
   
-  # if (block_len < (block_time - shortfall_threshold)) {
-  #   short_long <- "short"
-  # } else if (block_len > (block_time + long_time_threshold)) {
-  #   short_long <- "long"
-  # } else {
-  #   short_long <- "full_block"
-  # }
-  # return(short_long)
-  return(NA)
+  if (block_len < (block_time - shortfall_threshold)) {
+    short_long <- "short"
+  } else if (block_len > (block_time + long_time_threshold)) {
+    short_long <- "long"
+  } else {
+    short_long <- "full_block"
+  }
+  return(short_long)
+  # return(NA)
 }
 
 
